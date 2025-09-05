@@ -18,7 +18,7 @@ It uses the command line version of DSSP4.5 not the python module. The way to in
 
 # Output
 
-    python3 Identify_18_BetaTurn_Types.py 3q4z.cif
+    python3 Identify_18_BetaTurn_Types.py 3e5a.cif
     turn  num chn  res1 res4    seq  dssp    type  prev_name          Dist DistAng CA1-CA4     omega2    phi2    psi2   omega3    phi3     psi3  omega4   filename
     turn    1 A     129  132    ALED CGGG    AD    I                0.1491   22.26    5.59     177.38  -49.71  -46.55   176.06  -46.67   -13.00  178.89   3e5a
     turn    2 A     130  133    LEDF GGGE    AD    I                0.0383   11.23    5.71     176.06  -46.67  -13.00   178.89  -82.81    -9.11 -177.51   3e5a
@@ -48,4 +48,16 @@ It uses the command line version of DSSP4.5 not the python module. The way to in
     turn   26 A     368  371    PSQR GGGS    AD    I                0.0231    8.71    5.33     175.12  -57.76  -26.21  -179.37  -83.35    -8.55 -172.47   3e5a
     turn   27 B      18   21    NFSS CTTC    AG    new_prev_VIII    0.2072   26.31    6.56    -170.89  -73.24  -26.65   179.65  -83.56    32.22  126.36   3e5a
    
-The output gives the residues of each beta turn (res1-res4), the sequence of the 4-residue turn, the dssp assignment of the turn ("C" is coil when DSSP does not report a secondary structure letter), the new turn type (e.g. "AD", "Pa", "Pd", etc.), the classical turn type (e.g. "I", "II"; "new_prev_VIII" indicates it is a new turn type but would formerly have been close to a type VIII turn). Then the distance in our metric, which the average of D=2(1-cos(d_theta)), where theta are the angles given on each line: omega2, phi2, psi2, omega3, phi3, psi3, omega4, which connect CA of the first residue to CA of the 4th residue of each turn. d_theta is the difference between the PDB dihedral angle and the medoid for that turn type, determined by the clustering described in Shapovalov et al. Following the distance in our metric ("Dist"), is the distance in degrees ("DistAng"), which is just the average angle distance converted back into an angle in degrees (theta = arccos(1 - D/2)). The CA1-CA4 distance is given next followed by all the dihedral angles.
+The output gives 
+* the residues of each beta turn (res1-res4)
+* the sequence of the 4-residue turn
+* the dssp assignment of the turn ("C" is coil when DSSP does not report a secondary structure letter)
+* the new turn type ("type", e.g. "AD", "Pa", "Pd", etc.)
+* the classical turn type ("prev_name", e.g. "I", "II"; "new_prev_VIII" indicates it is a new turn type but would formerly have been close to a type VIII turn).
+* the distance in our metric ("Dist"), which the average of D=2(1-cos(d_theta)), where theta are the angles given on each line: omega2, phi2, psi2, omega3, phi3, psi3, omega4, which connect CA of the first residue to CA of the 4th residue of each turn. d_theta is the difference between the PDB dihedral angle and the medoid for that turn type, determined by the clustering described in Shapovalov et al. F
+* "DistAng" is the distance in degrees, which is just the average angle distance converted back into an angle in degrees (theta = arccos(1 - D/2)).
+* "CA1-CA4" distance is given next followed by all the dihedral angles
+* Dihedral angles: omega2, phi2, psi2, omega3, phi3, psi3, omega4
+* Filename (minus ".cif" or ".pdb")
+
+The code also saves the mmCIF file produced by mkdssp and is named (in this example) 3e5a_dssp.cif.
