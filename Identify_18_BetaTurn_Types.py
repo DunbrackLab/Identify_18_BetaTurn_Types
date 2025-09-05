@@ -13,12 +13,10 @@
 # https://doi.org/10.1371/journal.pcbi.1006844
 
 import gzip
-import random
 import math
 import sys, os
 from Bio.PDB import *
 import subprocess
-import tempfile
 import shlex
 
 def angle_distance(angle1, angle2):
@@ -762,8 +760,12 @@ for model1 in structure1:
 
             auth_key=(chain1.id, str(curr_residue.id[1]))
             label_key = (seqscheme_dict[auth_key]['asym_id'], str(seqscheme_dict[auth_key]['seq_id']))
-            dssp_value=dssp_dict[label_key]['secondary_structure']
-            three10=dssp_dict[label_key]['helix_3_10']
+            if label_key in dssp_dict:
+                dssp_value=dssp_dict[label_key]['secondary_structure']
+                three10=dssp_dict[label_key]['helix_3_10']
+            else:
+                dssp_value = "."   # if last residue is incomplete, dssp does not provide a value
+                three10 = "."
             if dssp_value == ".": dssp_value="C"
 
             # output dihedral angles of whole structure with dssp_value
@@ -782,14 +784,17 @@ for model1 in structure1:
             #                  f'{dssp_value:5}    '
             #                  f'{shortfilename}'
             #    )
+            #            print(auth_key, label_key)
             curr_residue=residuelist[i]
-            CAcoor=structure1[model1.id][chain1.id][curr_residue.id]['CA'].get_vector()
+            if "CA" in structure1[model1.id][chain1.id][curr_residue.id]:
+                CAcoor=structure1[model1.id][chain1.id][curr_residue.id]['CA'].get_vector()
+            else:
+                CAcoor=None
             res3=curr_residue.resname
             res1=getres1(res3)
             datadict[chain1].append( {'model1':model1, 'chain_id':chain1.id, 'resnum':curr_residue.id[1], 'resname':res3, 'res1':res1,
                                       'omega':omega, 'phi':phi, 'psi':psi, 'chi1': chi1, 'chi2': chi2, 'chi3': chi3, 'chi4': chi4, 'chi5': chi5,
                                       'dssp_ss': dssp_value, 'three10':three10, 'auth_key':auth_key, 'label_key': label_key, 'CAcoor':CAcoor})
-
 # Find beta turns
 nturns=0
 
@@ -799,8 +804,10 @@ print(f'{"turn":<4} {"num":>4} {"chn":<4} {"res1":<4} {"res4":<4}    {"seq":<4} 
 for chain in datadict:
     for i in range(len(datadict[chain]) - 3):
 
-        vector1=datadict[chain][i]['CAcoor']
-        vector4=datadict[chain][i+3]['CAcoor']
+        vector1=datadict[chain][i]['CAcoor']   # CA atom is missing
+        if vector1 is None: continue
+        vector4=datadict[chain][i+3]['CAcoor']  # CA atom is missing
+        if vector4 is None: continue
         CA1_CA4_distance=(vector1 - vector4).norm()
         dssp1=datadict[chain][i]['dssp_ss']
         dssp2=datadict[chain][i+1]['dssp_ss']
