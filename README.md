@@ -18,7 +18,7 @@ It uses the command line version of DSSP4.5 not the python module. The way to in
 
 # Output
 
-     python3 Identify_18_BetaTurn_Types.py 3q4z.cif
+    python3 Identify_18_BetaTurn_Types.py 3q4z.cif
     turn  num chn  res1 res4    seq  dssp    type  prev_name          Dist DistAng CA1-CA4     omega2    phi2    psi2   omega3    phi3     psi3  omega4   filename
     turn    1 A     129  132    ALED CGGG    AD    I                0.1491   22.26    5.59     177.38  -49.71  -46.55   176.06  -46.67   -13.00  178.89   3e5a
     turn    2 A     130  133    LEDF GGGE    AD    I                0.0383   11.23    5.71     176.06  -46.67  -13.00   178.89  -82.81    -9.11 -177.51   3e5a
