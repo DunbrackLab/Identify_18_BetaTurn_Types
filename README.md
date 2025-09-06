@@ -3,8 +3,9 @@ Identifies beta turns in proteins according to Shapovalov, Vucetic, and Dunbrack
 
 This is a fresh and complete rewrite in python3 that replaces the python2 code we published in 2019.
 
-Requires mkdssp from DSSP4.5 : https://github.com/PDB-REDO/dssp
-It uses the command line version of DSSP4.5 not the python module. The way to install it in /usr/local/bin/mkdssp is:
+Requires mkdssp from DSSP4.5 : https://github.com/PDB-REDO/dssp.
+It uses the command line version of DSSP4.5 not the python module. 
+The way to install it in /usr/local/bin/mkdssp is:
 
     git clone https://github.com/PDB-REDO/dssp.git
     cd dssp
