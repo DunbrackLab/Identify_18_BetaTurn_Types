@@ -489,14 +489,17 @@ def parse_pdbx_poly_seq_scheme(mmCIF_path):
                     continue  # row didn't contain our category (mixed loop row)
 
                 # Form the key
+                asym_id = row_vals.get("asym_id")
                 pdb_strand_id = row_vals.get("pdb_strand_id")
                 pdb_seq_num   = row_vals.get("pdb_seq_num")
                 if pdb_strand_id is None or pdb_seq_num is None:
                     # Can't key this row; skip
                     continue
-
-                key = (pdb_strand_id, pdb_seq_num)
-
+                if pdb_strand_id != "?":
+                    key = (pdb_strand_id, pdb_seq_num)
+                else:
+                    key = (' ', pdb_seq_num)
+                    
                 # Build value dict excluding key fields
                 value = {k: v for k, v in row_vals.items()
                          if k not in ("pdb_strand_id", "pdb_seq_num")}
@@ -505,29 +508,43 @@ def parse_pdbx_poly_seq_scheme(mmCIF_path):
 
     return result
 
+import os
+import subprocess
+import tempfile
 
 def run_dssp(input_pdb_or_cif, dssp_executable="/usr/local/bin/mkdssp"):
     """
-    Run mkdssp on the input PDB/mmCIF file and return the path to the DSSP output file.
+    Run mkdssp on the input PDB/mmCIF file after removing problematic _audit_conform lines
+    (which cause mkdssp to fail on AlphaFold models). Returns the path to the DSSP output file.
     """
     if not os.path.isfile(input_pdb_or_cif):
         raise FileNotFoundError(f"Structure file not found: {input_pdb_or_cif}")
-
     if not os.path.isfile(dssp_executable):
         raise FileNotFoundError(f"DSSP executable not found: {dssp_executable}")
 
-    root = input_pdb_or_cif.split(".")[0]
-    dssp_output_path = root + "_dssp.cif"
-    cmd = [dssp_executable, input_pdb_or_cif, dssp_output_path]
+    # Remove _audit_conform lines and write to a temporary cleaned file
+    with open(input_pdb_or_cif, 'r') as infile, tempfile.NamedTemporaryFile('w', delete=False, suffix=".cif") as cleaned:
+        for line in infile:
+            if not line.startswith("_audit_conform."):
+                cleaned.write(line)
+        cleaned_input_path = cleaned.name
 
-        
+    root = os.path.splitext(os.path.basename(input_pdb_or_cif))[0]
+    dssp_output_path = f"{root}_dssp.cif"
+
+    cmd = [dssp_executable, cleaned_input_path, dssp_output_path]
+
     try:
         subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except subprocess.CalledProcessError as e:
-        #        os.remove(dssp_output_path)
+        os.remove(cleaned_input_path)
         raise RuntimeError(f"Error running DSSP: {e.stderr.decode()}")
+    
+    # Optionally remove the temporary cleaned input file
+    os.remove(cleaned_input_path)
 
     return dssp_output_path
+
 
 
 def compute_phi(structure, model, chain, prev_residue, curr_residue):          
@@ -738,7 +755,7 @@ for model1 in structure1:
         residuelist = list(chain1.get_residues())
         chainlen=len(residuelist)
         nres=0
-        phi=psi=omega=chi1=chi2=chi3=chi4=999.0
+        phi=psi=omega=chi1=chi2=chi3=chi4=chi5=999.0
 
         for i in range(0,chainlen):
             if not is_aa(residuelist[i]): continue
@@ -798,7 +815,7 @@ for model1 in structure1:
 # Find beta turns
 nturns=0
 
-print(f'{"turn":<4} {"num":>4} {"chn":<4} {"res1":<4} {"res4":<4}    {"seq":<4} {"dssp":<4}    {"type":<4}  {"prev_name":<13}    {"Dist":>6} {"DistAng":>7} {"CA1-CA4":>7}    {"omega2":>7} {"phi2":>7} {"psi2":>7}  {"omega3":>7} {"phi3":>7}  {"psi3":>7} {"omega4":>7}   {"filename"}')
+print(f'{"turn":<4} {"num":>4} {"chn":<4} {"res1":<4} {"res4":<4}    {"seq":<4} {"dssp":<4}    {"type":<5}  {"prev_name":<13}    {"Dist":>6} {"DistAng":>7} {"CA1-CA4":>7}    {"omega2":>7} {"phi2":>7} {"psi2":>7}  {"omega3":>7} {"phi3":>7}  {"psi3":>7} {"omega4":>7}   {"filename"}')
 
 
 for chain in datadict:
@@ -875,4 +892,4 @@ for chain in datadict:
             prevname = turnlibrary[minturn]['prev_name']
             mintheta=find_theta(minD)
             seq = datadict[chain][i]['res1'] + datadict[chain][i+1]['res1'] + datadict[chain][i+2]['res1'] + datadict[chain][i+3]['res1']
-            print(f'turn {nturns:4} {chain.id:4} {resnum1:4} {resnum4:4}    {seq:4} {dssp_string:4}    {minturn:4}  {prevname:13}    {minD:6.4f} {mintheta:7.2f} {CA1_CA4_distance:7.2f}    {omega2:7.2f} {phi2:7.2f} {psi2:7.2f}  {omega3:7.2f} {phi3:7.2f}  {psi3:7.2f} {omega4:7.2f}   {shortfilename}')
+            print(f'turn {nturns:4} {chain.id:4} {resnum1:4} {resnum4:4}    {seq:4} {dssp_string:4}    {minturn:5}  {prevname:13}    {minD:6.4f} {mintheta:7.2f} {CA1_CA4_distance:7.2f}    {omega2:7.2f} {phi2:7.2f} {psi2:7.2f}  {omega3:7.2f} {phi3:7.2f}  {psi3:7.2f} {omega4:7.2f}   {shortfilename}')
