@@ -67,4 +67,4 @@ The code also saves the mmCIF file produced by mkdssp and is named (in this exam
 
 # Caution
 
-mkdssp might fail on some PDB and mmCIF files. For instance, for AlphaFold3 models in mmCIF format, you need to remove references to the _audit_conform.dict records. I'll try to fix this later.
+mkdssp might fail on some PDB and mmCIF files. 
