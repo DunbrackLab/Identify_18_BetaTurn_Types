@@ -13,6 +13,12 @@ The way to install it in /usr/local/bin/mkdssp is:
     cmake --build build
     cmake --install build
 
+To make mkdssp work on AlphaFold files, you might need to install these files manually (including making the directory /var/cache/libcifpp/):
+
+     curl -o /var/cache/libcifpp/components.cif https://files.wwpdb.org/pub/pdb/data/monomers/components.cif
+     curl -o /var/cache/libcifpp/mmcif_pdbx.dic https://mmcif.wwpdb.org/dictionaries/ascii/mmcif_pdbx_v50.dic
+     curl -o /var/cache/libcifpp/mmcif_ma.dic https://raw.githubusercontent.com/ihmwg/ModelCIF/master/dist/mmcif_ma.dic
+
 # Usage
 
     python3 Identify_18_BetaTurn_Types.py filename.cif > outfilename
