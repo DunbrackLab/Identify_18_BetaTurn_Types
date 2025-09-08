@@ -15,6 +15,10 @@ The way to install it in /usr/local/bin/mkdssp is:
     cmake --build build
     cmake --install build
 
+If you install mkdssp somewhere else, change the code in Identify_18_BetaTurn_Types.py here:
+
+    def run_dssp(input_pdb_or_cif, dssp_executable="/usr/local/bin/mkdssp"):
+
 To make mkdssp work on AlphaFold files, you might need to install these files manually (including making the directory /var/cache/libcifpp/):
 
      curl -o /var/cache/libcifpp/components.cif https://files.wwpdb.org/pub/pdb/data/monomers/components.cif
