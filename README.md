@@ -3,6 +3,8 @@ Identifies beta turns in proteins according to Shapovalov, Vucetic, and Dunbrack
 
 This is a fresh and complete rewrite in python3 that replaces the python2 code we published in 2019.
 
+# Installation
+
 Requires mkdssp from DSSP4.5 : https://github.com/PDB-REDO/dssp.
 It uses the command line version of DSSP4.5 not the python module. 
 The way to install it in /usr/local/bin/mkdssp is:
@@ -19,15 +21,17 @@ To make mkdssp work on AlphaFold files, you might need to install these files ma
      curl -o /var/cache/libcifpp/mmcif_pdbx.dic https://mmcif.wwpdb.org/dictionaries/ascii/mmcif_pdbx_v50.dic
      curl -o /var/cache/libcifpp/mmcif_ma.dic https://raw.githubusercontent.com/ihmwg/ModelCIF/master/dist/mmcif_ma.dic
 
+Then install Identify_18_BetaTurn_Types by downloading the git zip file. Put it anywhere on your computer (let's call it "path_to_script/". The code is all in one file and does not require any paths or files other than the path the python script itself.
+
 # Usage
 
-    python3 Identify_18_BetaTurn_Types.py filename.cif > outfilename
-    python3 Identify_18_BetaTurn_Types.py filename.pdb > outfilename
+    python3 path_to_script/Identify_18_BetaTurn_Types.py filename.cif > outfilename
+    python3 path_to_script/Identify_18_BetaTurn_Types.py filename.pdb > outfilename
 
 
 # Output
 
-    python3 Identify_18_BetaTurn_Types.py 3e5a.cif
+    python3 path_to_script/Identify_18_BetaTurn_Types.py 3e5a.cif
     turn  num chn  res1 res4    seq  dssp    type  prev_name          Dist DistAng CA1-CA4     omega2    phi2    psi2   omega3    phi3     psi3  omega4   filename
     turn    1 A     129  132    ALED CGGG    AD    I                0.1491   22.26    5.59     177.38  -49.71  -46.55   176.06  -46.67   -13.00  178.89   3e5a
     turn    2 A     130  133    LEDF GGGE    AD    I                0.0383   11.23    5.71     176.06  -46.67  -13.00   178.89  -82.81    -9.11 -177.51   3e5a
