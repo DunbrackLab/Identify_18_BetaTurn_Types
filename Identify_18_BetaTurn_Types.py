@@ -18,6 +18,10 @@ import sys, os
 from Bio.PDB import *
 import subprocess
 import shlex
+import tempfile
+
+
+TURN_DIST_CUTOFF = 0.2359   # this it the cutoff for the average D (distance from medoid of each cluster) over 7 dihedral angles where D=2(1-cos(dtheta)).
 
 def angle_distance(angle1, angle2):
     delta = angle1 - angle2
@@ -26,13 +30,11 @@ def angle_distance(angle1, angle2):
     distance = 2.0*(1.0-delta_cos)
     return distance
 
-import math
-
-def find_theta(D):
+def find_theta_in_degrees(D):
     if D < 0 or D > 4:
         raise ValueError("D must be in the range [0, 4] for a real solution.")
     
-    cos_theta = 1 - D / 2
+    cos_theta = 1.0 - D / 2.0
     theta_rad = math.acos(cos_theta)
     theta_deg = math.degrees(theta_rad)
     
@@ -49,6 +51,7 @@ def getres1(res3):
         return 'X'
 
 def define_turn_library():
+    # definitions for 18 beta turn types from Shapovalov, Vucetic, and Dunbrack, 2019.
     result={}
     result['AD']=     {'no_by_size':  1,   'cluster_size':  6413,  'frequency':  0.49217,  'bturn_name':  'AD',     'prev_name':  'I',
                        'median_below_7A_ca1_ca4':  5.48,  'mean_below_7A_ca1_ca4':  5.52,  'median_any_ca1_ca4':  5.51,  'mean_any_ca1_ca4':  5.65,
@@ -217,7 +220,9 @@ def define_turn_library():
 
 def parse_dssp_struct_summary(mmCIF_path):
     """
-    Parse the _dssp_struct_summary loop from an mmCIF file.
+    Parse the _dssp_struct_summary loop from an mmCIF file produced by mkdssp:
+
+    mkdssp input.cif input_dssp.cif
 
     Returns
     -------
@@ -226,59 +231,62 @@ def parse_dssp_struct_summary(mmCIF_path):
         Column names are taken from the item names after the dot,
         e.g., '_dssp_struct_summary.secondary_structure' -> 'secondary_structure'.
         The key fields 'label_asym_id' and 'label_seq_id' are excluded from the value dict.
+
+    example dssp mmCIF file:
+    
+    loop_
+    _dssp_struct_summary.entry_id
+    _dssp_struct_summary.label_asym_id
+    _dssp_struct_summary.label_seq_id
+    _dssp_struct_summary.label_comp_id
+    _dssp_struct_summary.secondary_structure
+    _dssp_struct_summary.ss_bridge
+    _dssp_struct_summary.helix_3_10
+    _dssp_struct_summary.helix_alpha
+    _dssp_struct_summary.helix_pi
+    _dssp_struct_summary.helix_pp
+    _dssp_struct_summary.bend
+    _dssp_struct_summary.chirality
+    _dssp_struct_summary.sheet
+    _dssp_struct_summary.strand
+    _dssp_struct_summary.ladder_1
+    _dssp_struct_summary.ladder_2
+    _dssp_struct_summary.accessibility
+    _dssp_struct_summary.TCO
+    _dssp_struct_summary.kappa
+    _dssp_struct_summary.alpha
+    _dssp_struct_summary.phi
+    _dssp_struct_summary.psi
+    _dssp_struct_summary.x_ca
+    _dssp_struct_summary.y_ca
+    _dssp_struct_summary.z_ca
+    1B9O A 1   LYS . . . . . . . . . . . . ?      .     .      .      .  141.4   7.2 28.4 41.0
+    1B9O A 2   GLN B . . . . . . - A A A . ? -0.965     . -156.0 -111.0  110.9   7.1 24.6 40.2
+    1B9O A 3   PHE . . . . . . . - . . . . ? -0.478  10.2 -126.4  -82.6  158.5   3.5 23.4 40.3
+    1B9O A 4   THR . . . > . . . - . . . . ? -0.588  30.6 -106.4  -90.9  162.3   2.3 19.8 41.0
+    1B9O A 5   LYS H . . > . . S + . . . . ?  0.910 120.9   48.3  -54.6  -45.2   0.0 18.1 38.6
+    1B9O A 6   CYS H 1 . > . . S + . . . . ?  0.859 108.4   54.5  -70.7  -33.8  -2.9 18.4 41.0
+    1B9O A 7   GLU H . . > . . S + . . . . ?  0.920 111.2   44.0  -60.7  -45.4  -2.3 22.1 41.6
+    1B9O A 8   LEU H . . X . . S + . . . . ?  0.871 107.4   60.4  -68.8  -36.5  -2.3 22.9 37.9
+    1B9O A 9   SER H . . < . . S + . . . . ?  0.928 107.8   45.3  -55.8  -40.9  -5.4 20.8 37.4
+    1B9O A 10  GLN H . > < . . S + . . . . ?  0.883 115.6   46.3  -67.3  -40.6  -7.2 23.0 39.8
+    1B9O A 11  LEU H . 3 < . . S + . . . . ?  0.855 119.6   38.9  -70.7  -34.9  -6.0 26.2 38.2
+    1B9O A 12  LEU T . > X . . S + . . . . ?  0.290  80.4  110.7  -96.3    4.2  -6.7 25.0 34.7
+    1B9O A 13  LYS G . X 4 . . S + . . . . ?  0.856  77.1   53.0  -50.1  -39.3 -10.0 23.3 35.4
+    1B9O A 14  ASP G . 3 4 . . S + . . . . ?  0.668  99.4   61.6  -78.5  -12.1 -11.9 25.9 33.5
+    1B9O A 15  ILE G . X 4 . . S + . . . . ?  0.572  71.8  126.1  -87.8   -2.8  -9.9 25.7 30.4
+    1B9O A 16  ASP T . < < . . S + . . . . ? -0.392  80.5   14.4  -56.8  125.4 -10.9 22.1 29.9
+    1B9O A 17  GLY T . > . . . S + . . . . ?  0.172  85.8  146.1   91.5   -7.5 -12.3 21.8 26.3
+    1B9O A 18  TYR G . X . . . S + . . . . ? -0.376  83.0    0.1  -59.8  130.6 -11.0 25.2 25.2
+    1B9O A 19  GLY G . 3 . . . S - . . . . ?  0.722 130.9  -68.6   62.3   15.2 -10.1 24.8 21.5
+    1B9O A 20  GLY G . < . . . S + . . . . ?  0.687 100.4  135.0   77.2   18.2 -11.2 21.2 21.8
+
     """
 
-    # loop_
-    # _dssp_struct_summary.entry_id
-    # _dssp_struct_summary.label_asym_id
-    # _dssp_struct_summary.label_seq_id
-    # _dssp_struct_summary.label_comp_id
-    # _dssp_struct_summary.secondary_structure
-    # _dssp_struct_summary.ss_bridge
-    # _dssp_struct_summary.helix_3_10
-    # _dssp_struct_summary.helix_alpha
-    # _dssp_struct_summary.helix_pi
-    # _dssp_struct_summary.helix_pp
-    # _dssp_struct_summary.bend
-    # _dssp_struct_summary.chirality
-    # _dssp_struct_summary.sheet
-    # _dssp_struct_summary.strand
-    # _dssp_struct_summary.ladder_1
-    # _dssp_struct_summary.ladder_2
-    # _dssp_struct_summary.accessibility
-    # _dssp_struct_summary.TCO
-    # _dssp_struct_summary.kappa
-    # _dssp_struct_summary.alpha
-    # _dssp_struct_summary.phi
-    # _dssp_struct_summary.psi
-    # _dssp_struct_summary.x_ca
-    # _dssp_struct_summary.y_ca
-    # _dssp_struct_summary.z_ca
-    # 1B9O A 1   LYS . . . . . . . . . . . . ?      .     .      .      .  141.4   7.2 28.4 41.0
-    # 1B9O A 2   GLN B . . . . . . - A A A . ? -0.965     . -156.0 -111.0  110.9   7.1 24.6 40.2
-    # 1B9O A 3   PHE . . . . . . . - . . . . ? -0.478  10.2 -126.4  -82.6  158.5   3.5 23.4 40.3
-    # 1B9O A 4   THR . . . > . . . - . . . . ? -0.588  30.6 -106.4  -90.9  162.3   2.3 19.8 41.0
-    # 1B9O A 5   LYS H . . > . . S + . . . . ?  0.910 120.9   48.3  -54.6  -45.2   0.0 18.1 38.6
-    # 1B9O A 6   CYS H 1 . > . . S + . . . . ?  0.859 108.4   54.5  -70.7  -33.8  -2.9 18.4 41.0
-    # 1B9O A 7   GLU H . . > . . S + . . . . ?  0.920 111.2   44.0  -60.7  -45.4  -2.3 22.1 41.6
-    # 1B9O A 8   LEU H . . X . . S + . . . . ?  0.871 107.4   60.4  -68.8  -36.5  -2.3 22.9 37.9
-    # 1B9O A 9   SER H . . < . . S + . . . . ?  0.928 107.8   45.3  -55.8  -40.9  -5.4 20.8 37.4
-    # 1B9O A 10  GLN H . > < . . S + . . . . ?  0.883 115.6   46.3  -67.3  -40.6  -7.2 23.0 39.8
-    # 1B9O A 11  LEU H . 3 < . . S + . . . . ?  0.855 119.6   38.9  -70.7  -34.9  -6.0 26.2 38.2
-    # 1B9O A 12  LEU T . > X . . S + . . . . ?  0.290  80.4  110.7  -96.3    4.2  -6.7 25.0 34.7
-    # 1B9O A 13  LYS G . X 4 . . S + . . . . ?  0.856  77.1   53.0  -50.1  -39.3 -10.0 23.3 35.4
-    # 1B9O A 14  ASP G . 3 4 . . S + . . . . ?  0.668  99.4   61.6  -78.5  -12.1 -11.9 25.9 33.5
-    # 1B9O A 15  ILE G . X 4 . . S + . . . . ?  0.572  71.8  126.1  -87.8   -2.8  -9.9 25.7 30.4
-    # 1B9O A 16  ASP T . < < . . S + . . . . ? -0.392  80.5   14.4  -56.8  125.4 -10.9 22.1 29.9
-    # 1B9O A 17  GLY T . > . . . S + . . . . ?  0.172  85.8  146.1   91.5   -7.5 -12.3 21.8 26.3
-    # 1B9O A 18  TYR G . X . . . S + . . . . ? -0.376  83.0    0.1  -59.8  130.6 -11.0 25.2 25.2
-    # 1B9O A 19  GLY G . 3 . . . S - . . . . ?  0.722 130.9  -68.6   62.3   15.2 -10.1 24.8 21.5
-    # 1B9O A 20  GLY G . < . . . S + . . . . ?  0.687 100.4  135.0   77.2   18.2 -11.2 21.2 21.8
-
-
+    # reading dssp structure summary table only
     category_prefix = "_dssp_struct_summary."
 
-    def norm(val):
+    def norm(val):  # remove enclosing single or double quotes from values
         if len(val) >= 2 and ((val[0] == val[-1] == '"') or (val[0] == val[-1] == "'")):
             return val[1:-1]
         return val
@@ -367,6 +375,8 @@ def parse_dssp_struct_summary(mmCIF_path):
                 if label_asym_id is None or label_seq_id is None:
                     continue  # Cannot key this row
 
+                # mkdssp does NOT provide auth_asym_id, pdb_strand_id (same as auth_asym_id), or auth_seq_id, so we use label_asym_id and label_seq_id as keys
+                # label_seq_id is 1_to_N numbering for each chain; label_asym_id is PDB's chain_id which may differ from author
                 key = (label_asym_id, label_seq_id)
                 value = {k: v for k, v in row_vals.items()
                          if k not in ("label_asym_id", "label_seq_id")}
@@ -378,6 +388,9 @@ def parse_dssp_struct_summary(mmCIF_path):
 def parse_pdbx_poly_seq_scheme(mmCIF_path):
     """
     Parse the _pdbx_poly_seq_scheme loop from an mmCIF file.
+    mkdssp mmCIF file may be missing some fields.
+    Key should be (pdb_strand_id, pdb_seq_num) but for mkdssp files missing these (usually when converted from PDB-format files,
+    asym_id or auth_seq_num may be used instead.
 
     Returns
     -------
@@ -442,8 +455,6 @@ def parse_pdbx_poly_seq_scheme(mmCIF_path):
             # Helper to normalize tokens
             def norm(val):
                 v = val
-                #                if v in (".", "?"):
-                #                    return None
                 # strip surrounding quotes if any (shlex already handles most)
                 if (len(v) >= 2) and ((v[0] == v[-1] == '"') or (v[0] == v[-1] == "'")):
                     v = v[1:-1]
@@ -489,28 +500,21 @@ def parse_pdbx_poly_seq_scheme(mmCIF_path):
                     continue  # row didn't contain our category (mixed loop row)
 
                 # Form the key
-                asym_id = row_vals.get("asym_id")
-                pdb_strand_id = row_vals.get("pdb_strand_id")
-                pdb_seq_num   = row_vals.get("pdb_seq_num")
-                if pdb_strand_id is None or pdb_seq_num is None:
-                    # Can't key this row; skip
-                    continue
-                if pdb_strand_id != "?":
-                    key = (pdb_strand_id, pdb_seq_num)
-                else:
-                    key = (' ', pdb_seq_num)
-                    
-                # Build value dict excluding key fields
-                value = {k: v for k, v in row_vals.items()
-                         if k not in ("pdb_strand_id", "pdb_seq_num")}
+
+                pdb_strand_id = row_vals.get("pdb_strand_id") or row_vals.get("asym_id") or " "
+                pdb_seq_num   = row_vals.get("pdb_seq_num") or row_vals.get("auth_seq_num")
+                if pdb_seq_num is None:
+                    continue  # Can't key this row
+                
+                key = (pdb_strand_id, pdb_seq_num)
+
+                # Build value dict 
+                value = {k: v for k, v in row_vals.items()}
+                #                         if k not in ("pdb_strand_id", "pdb_seq_num")}
 
                 result[key] = value
 
     return result
-
-import os
-import subprocess
-import tempfile
 
 def run_dssp(input_pdb_or_cif, dssp_executable="/usr/local/bin/mkdssp"):
     """
@@ -589,6 +593,7 @@ def compute_omega(structure,model,chain,prev_residue,curr_residue):
         omega=round(math.degrees(calc_dihedral(prev_ca,prev_c,curr_n,curr_a)),6)
     return omega
 
+# chi angles are not used but are legacy from another script; might be useful
 def compute_chi1(structure,model,chain,curr_residue):
     chi1=999.00
     curr_n=0
@@ -607,7 +612,6 @@ def compute_chi1(structure,model,chain,curr_residue):
         if curr_residue.has_id(atomname): curr_g=structure[model.id][chain.id][curr_residue.id][atomname].get_vector()
     if curr_n and curr_a and curr_b and curr_g:
         chi1=round(math.degrees(calc_dihedral(curr_n, curr_a, curr_b, curr_g)),6)
-        
     return chi1
 
 def compute_chi2(structure,model,chain,curr_residue):
@@ -719,177 +723,192 @@ def compute_chi5(structure,model,chain,curr_residue):
     return chi5
 
 # Main
-pdbfilename=sys.argv[1]
-shortfilename=pdbfilename
-shortfilename=shortfilename.replace('.gz','')
-shortfilename=shortfilename.replace('.cif','')
-shortfilename=shortfilename.replace('.pdb','')
-shortlist=shortfilename.split("/")
-shortfilename=shortlist[-1]
 
-
-# run analysis
-dssp_file_path=run_dssp(pdbfilename)  # run mkdssp from DSSP4.5 which outputs an mmCIF file with DSSSP data; easier to pass than standard dssp output
-seqscheme_dict = parse_pdbx_poly_seq_scheme(dssp_file_path) # read mmcif poly_seq_scheme to get correspondence of sequence (1 to N) to auth_seq_nums
-dssp_dict = parse_dssp_struct_summary(dssp_file_path)  # 
-turnlibrary=define_turn_library()  # read turn library data of 18 turn types from our 2019 paper
-
-
-
-if '.gz' in pdbfilename.lower():      
-    handle=gzip.open(pdbfilename, 'rt')
-else:
-    handle=open(pdbfilename, 'r')
-
-if '.cif' in pdbfilename.lower():
-    parser=MMCIFParser(QUIET=True)
-if '.pdb' in pdbfilename.lower():
-    parser=PDBParser(QUIET=True)
-
-structure1=parser.get_structure(pdbfilename, handle)
+def main():
+    pdbfilename=sys.argv[1]
+    base = os.path.basename(pdbfilename).replace(".gz", "")
+    shortfilename = os.path.splitext(base)[0]
     
-datadict={}
-for model1 in structure1:
-    for chain1 in model1:
-        datadict[chain1]=list()
-        residuelist = list(chain1.get_residues())
-        chainlen=len(residuelist)
-        nres=0
-        phi=psi=omega=chi1=chi2=chi3=chi4=chi5=999.0
-
-        for i in range(0,chainlen):
-            if not is_aa(residuelist[i]): continue
-            nres += 1
-            if nres>1: 
-                phi=  compute_phi(  structure1, model1, chain1, residuelist[i-1], residuelist[i])
-                omega=compute_omega(structure1, model1, chain1, residuelist[i-1], residuelist[i])
-            if nres<chainlen:
-                psi=  compute_psi(  structure1, model1, chain1, residuelist[i], residuelist[i+1])
-                
-            # don't need chi angles; legacy part of script
-            chi1=compute_chi1(structure1, model1, chain1, residuelist[i])
-            chi2=compute_chi2(structure1, model1, chain1, residuelist[i])
-            chi3=compute_chi3(structure1, model1, chain1, residuelist[i])
-            chi4=compute_chi4(structure1, model1, chain1, residuelist[i])
-            chi5=compute_chi5(structure1, model1, chain1, residuelist[i])
-
-            curr_residue=residuelist[i]
-
-            auth_key=(chain1.id, str(curr_residue.id[1]))
-            label_key = (seqscheme_dict[auth_key]['asym_id'], str(seqscheme_dict[auth_key]['seq_id']))
-            if label_key in dssp_dict:
-                dssp_value=dssp_dict[label_key]['secondary_structure']
-                three10=dssp_dict[label_key]['helix_3_10']
-            else:
-                dssp_value = "."   # if last residue is incomplete, dssp does not provide a value
+    
+    # run analysis
+    dssp_file_path=run_dssp(pdbfilename)  # run mkdssp from DSSP4.5 which outputs an mmCIF file with DSSP data; easier to pass than standard dssp output
+    seqscheme_dict = parse_pdbx_poly_seq_scheme(dssp_file_path) # read mmcif poly_seq_scheme to get correspondence of sequence (1 to N) to auth_seq_nums
+    dssp_dict = parse_dssp_struct_summary(dssp_file_path)  # 
+    turnlibrary=define_turn_library()  # read turn library data of 18 turn types from our 2019 paper
+    
+    if '.gz' in pdbfilename.lower():      
+        handle=gzip.open(pdbfilename, 'rt')
+    else:
+        handle=open(pdbfilename, 'r')
+    
+    if '.cif' in pdbfilename.lower():
+        parser=MMCIFParser(QUIET=True)
+    if '.pdb' in pdbfilename.lower():
+        parser=PDBParser(QUIET=True)
+    
+    structure1=parser.get_structure(pdbfilename, handle)
+        
+    datadict={}
+    
+    for model1 in structure1:
+        for chain1 in model1:
+            aa_residues = [r for r in chain1 if is_aa(r)]
+            if len(aa_residues) < 4:
+                continue  # Skip short chains — can't form a 4-residue turn
+    
+            datadict[chain1] = []
+    
+            for i, res in enumerate(aa_residues):
+                phi = psi = omega = chi1 = chi2 = chi3 = chi4 = chi5 = 999.0
+    
+                if i > 0:
+                    phi = compute_phi(structure1, model1, chain1, aa_residues[i - 1], res)
+                    omega = compute_omega(structure1, model1, chain1, aa_residues[i - 1], res)
+    
+                if i + 1 < len(aa_residues):
+                    psi = compute_psi(structure1, model1, chain1, res, aa_residues[i + 1])
+    
+                chi1 = compute_chi1(structure1, model1, chain1, res)
+                chi2 = compute_chi2(structure1, model1, chain1, res)
+                chi3 = compute_chi3(structure1, model1, chain1, res)
+                chi4 = compute_chi4(structure1, model1, chain1, res)
+                chi5 = compute_chi5(structure1, model1, chain1, res)
+    
+                resnum = res.id[1]
+                res3letter = res.resname
+                res1letter = getres1(res3letter)
+    
+                # Safe lookup of DSSP label
+                auth_key = (chain1.id, str(resnum))
+                if auth_key in seqscheme_dict:
+                    label_asym_id = seqscheme_dict[auth_key]['asym_id']
+                    label_seq_id = str(seqscheme_dict[auth_key]['seq_id'])
+                    label_key = (label_asym_id, label_seq_id)
+                else:
+                    label_key = None
+                    # Optional: warn about missing mapping
+                    print(f"Warning: Missing seqscheme_dict entry for {auth_key}", file=sys.stderr)
+    
+                dssp_value = "."
                 three10 = "."
-            if dssp_value == ".": dssp_value="C"
+    
+                if label_key and label_key in dssp_dict:
+                    dssp_value = dssp_dict[label_key].get('secondary_structure', '.')
+                    three10 = dssp_dict[label_key].get('helix_3_10', '.')
+    
+                if dssp_value == ".":
+                    dssp_value = "C"  # for "coil"
+    
+                CAcoor = res['CA'].get_vector() if res.has_id('CA') else None
+    
+                datadict[chain1].append({
+                    'model1': model1,
+                    'chain_id': chain1.id,
+                    'resnum': resnum,
+                    'resname': res3letter,
+                    'res1': res1letter,
+                    'omega': omega,
+                    'phi': phi,
+                    'psi': psi,
+                    'chi1': chi1,
+                    'chi2': chi2,
+                    'chi3': chi3,
+                    'chi4': chi4,
+                    'chi5': chi5,
+                    'dssp_ss': dssp_value,
+                    'three10': three10,
+                    'auth_key': auth_key,
+                    'label_key': label_key,
+                    'CAcoor': CAcoor
+                })
+    
+    
+    # Find beta turns
+    nturns=0
 
-            # output dihedral angles of whole structure with dssp_value
-            #            print(f'{curr_residue.id[1]:>5}  '
-            #                  f'{curr_residue.resname:<3}  '
-            #                  f'{model1.id:<5}  '
-            #                  f'{chain1.id:<5}  '
-            #                  f'{phi:>9.3f}  '
-            #                  f'{psi:>9.3f}  '
-            #                  f'{omega:>9.3f}  '
-            #                  f'{chi1:>9.3f}  '
-            #                  f'{chi2:>9.3f}  '
-            #                  f'{chi3:>9.3f}  '
-            #                  f'{chi4:>9.3f}  '
-            #                  f'{chi5:>9.3f}    '
-            #                  f'{dssp_value:5}    '
-            #                  f'{shortfilename}'
-            #    )
-            #            print(auth_key, label_key)
-            curr_residue=residuelist[i]
-            if "CA" in structure1[model1.id][chain1.id][curr_residue.id]:
-                CAcoor=structure1[model1.id][chain1.id][curr_residue.id]['CA'].get_vector()
-            else:
-                CAcoor=None
-            res3=curr_residue.resname
-            res1=getres1(res3)
-            datadict[chain1].append( {'model1':model1, 'chain_id':chain1.id, 'resnum':curr_residue.id[1], 'resname':res3, 'res1':res1,
-                                      'omega':omega, 'phi':phi, 'psi':psi, 'chi1': chi1, 'chi2': chi2, 'chi3': chi3, 'chi4': chi4, 'chi5': chi5,
-                                      'dssp_ss': dssp_value, 'three10':three10, 'auth_key':auth_key, 'label_key': label_key, 'CAcoor':CAcoor})
-# Find beta turns
-nturns=0
+    # print header
+    print(f'{"turn":<4} {"num":>4} {"chn":<4} {"res1":<4} {"res4":<4}    {"seq":<4} {"dssp":<4}    {"type":<5}  {"prev_name":<13}    {"Dist":>6} {"DistAng":>7} {"CA1-CA4":>7}    {"omega2":>7} {"phi2":>7} {"psi2":>7}  {"omega3":>7} {"phi3":>7}  {"psi3":>7} {"omega4":>7}   {"filename"}')
+    
+    
+    for chain in datadict:
+        for i in range(len(datadict[chain]) - 3):
+    
+            vector1=datadict[chain][i]['CAcoor']   
+            if vector1 is None: continue  # CA atom is missing
+            vector4=datadict[chain][i+3]['CAcoor']  
+            if vector4 is None: continue  # CA atom is missing
+            CA1_CA4_distance=(vector1 - vector4).norm()
+            dssp1=datadict[chain][i]['dssp_ss']
+            dssp2=datadict[chain][i+1]['dssp_ss']
+            dssp3=datadict[chain][i+2]['dssp_ss']
+            dssp4=datadict[chain][i+3]['dssp_ss']
+            dssp_string = dssp1 + dssp2 + dssp3 + dssp4
 
-print(f'{"turn":<4} {"num":>4} {"chn":<4} {"res1":<4} {"res4":<4}    {"seq":<4} {"dssp":<4}    {"type":<5}  {"prev_name":<13}    {"Dist":>6} {"DistAng":>7} {"CA1-CA4":>7}    {"omega2":>7} {"phi2":>7} {"psi2":>7}  {"omega3":>7} {"phi3":>7}  {"psi3":>7} {"omega4":>7}   {"filename"}')
-
-
-for chain in datadict:
-    for i in range(len(datadict[chain]) - 3):
-
-        vector1=datadict[chain][i]['CAcoor']   # CA atom is missing
-        if vector1 is None: continue
-        vector4=datadict[chain][i+3]['CAcoor']  # CA atom is missing
-        if vector4 is None: continue
-        CA1_CA4_distance=(vector1 - vector4).norm()
-        dssp1=datadict[chain][i]['dssp_ss']
-        dssp2=datadict[chain][i+1]['dssp_ss']
-        dssp3=datadict[chain][i+2]['dssp_ss']
-        dssp4=datadict[chain][i+3]['dssp_ss']
-        dssp_string = dssp1 + dssp2 + dssp3 + dssp4
-
-        threeten1=datadict[chain][i]['three10']
-        threeten2=datadict[chain][i+1]['three10']
-        threeten3=datadict[chain][i+2]['three10']
-        threeten4=datadict[chain][i+3]['three10']
-
-        dssp_string = dssp1 + dssp2 + dssp3 + dssp4
-        three10string = threeten1 + threeten2 + threeten3 + threeten4
-        if dssp_string == "HGGG": continue  # skip G helices abutting alpha helices
-        if dssp_string == "GGGH": continue  # skip G helices abutting alpha helices
-        if dssp_string == "GGGG": continue  # skip long G helices
-        if dssp2 in ('H','E'): continue
-        if dssp3 in ('H','E'): continue
-        # include GGG if they are three residues but not longer; DSSP always has "3" in middle residue of helix_3_10 value
-        if dssp_string.startswith("GGG") or dssp_string.endswith("GGG"):
-            if "3" not in three10string: continue
-
-        omega2=datadict[chain][i+1]['omega']
-        if omega2 == 999.0: continue
-        phi2=datadict[chain][i+1]['phi']
-        if phi2 == 999.0: continue
-        psi2=datadict[chain][i+1]['psi']
-        if psi2 == 999.0: continue
-        omega3=datadict[chain][i+2]['omega']
-        if omega3 == 999.0: continue
-        phi3=datadict[chain][i+2]['phi']
-        if phi3 == 999.0: continue
-        psi3=datadict[chain][i+2]['psi']
-        if psi3 == 999.0: continue
-        omega4=datadict[chain][i+3]['omega']
-        if omega4 == 999.0: continue
-        if CA1_CA4_distance>7.0: continue
-
-        minD=100.0
-        for turn in turnlibrary:
-            medoid_omega2=turnlibrary[turn]['medoid_omega2']
-            medoid_phi2=turnlibrary[turn]['medoid_phi2']
-            medoid_psi2=turnlibrary[turn]['medoid_psi2']
-            medoid_omega3=turnlibrary[turn]['medoid_omega3']
-            medoid_phi3=turnlibrary[turn]['medoid_phi3']
-            medoid_psi3=turnlibrary[turn]['medoid_psi3']
-            medoid_omega4=turnlibrary[turn]['medoid_omega4']
-
-            D = (angle_distance(omega2, medoid_omega2) +
-                 angle_distance(phi2, medoid_phi2) +
-                 angle_distance(psi2, medoid_psi2) +
-                 angle_distance(omega3, medoid_omega3) +
-                 angle_distance(phi3, medoid_phi3) +
-                 angle_distance(psi3, medoid_psi3) +
-                 angle_distance(omega4, medoid_omega4))/7.0
-            if D<minD:
-                minD = D
-                minturn=turn
-                
-        if minD<= 0.2359:
-            nturns += 1
-            resnum1 = int(datadict[chain][i]['auth_key'][1])
-            resnum4 = resnum1+3
-            prevname = turnlibrary[minturn]['prev_name']
-            mintheta=find_theta(minD)
-            seq = datadict[chain][i]['res1'] + datadict[chain][i+1]['res1'] + datadict[chain][i+2]['res1'] + datadict[chain][i+3]['res1']
-            print(f'turn {nturns:4} {chain.id:4} {resnum1:4} {resnum4:4}    {seq:4} {dssp_string:4}    {minturn:5}  {prevname:13}    {minD:6.4f} {mintheta:7.2f} {CA1_CA4_distance:7.2f}    {omega2:7.2f} {phi2:7.2f} {psi2:7.2f}  {omega3:7.2f} {phi3:7.2f}  {psi3:7.2f} {omega4:7.2f}   {shortfilename}')
+            # get helix_3_10 field from dssp. Three-residue 3-10 helices have "3" in this field for middle residue
+            threeten1=datadict[chain][i]['three10']
+            threeten2=datadict[chain][i+1]['three10']
+            threeten3=datadict[chain][i+2]['three10']
+            threeten4=datadict[chain][i+3]['three10']
+    
+            dssp_string = dssp1 + dssp2 + dssp3 + dssp4
+            three10string = threeten1 + threeten2 + threeten3 + threeten4
+            if dssp_string == "HGGG": continue  # skip G helices abutting alpha helices
+            if dssp_string == "GGGH": continue  # skip G helices abutting alpha helices
+            if dssp_string == "GGGG": continue  # skip long G helices
+            if dssp2 in ('H','E'): continue  # skip regular secondary structure for residue 2
+            if dssp3 in ('H','E'): continue  # skip regular secondary structure for residue 3
+            
+            # include GGG if they are three residues but not longer; DSSP always has "3" in middle residue of helix_3_10 value
+            if dssp_string.startswith("GGG") or dssp_string.endswith("GGG"):
+                if "3" not in three10string: continue
+    
+            omega2=datadict[chain][i+1]['omega']
+            if omega2 == 999.0: continue
+            phi2=datadict[chain][i+1]['phi']
+            if phi2 == 999.0: continue
+            psi2=datadict[chain][i+1]['psi']
+            if psi2 == 999.0: continue
+            omega3=datadict[chain][i+2]['omega']
+            if omega3 == 999.0: continue
+            phi3=datadict[chain][i+2]['phi']
+            if phi3 == 999.0: continue
+            psi3=datadict[chain][i+2]['psi']
+            if psi3 == 999.0: continue
+            omega4=datadict[chain][i+3]['omega']
+            if omega4 == 999.0: continue
+            if CA1_CA4_distance>7.0: continue
+    
+            minD=100.0
+            for turn in turnlibrary:
+                medoid_omega2=turnlibrary[turn]['medoid_omega2']
+                medoid_phi2=turnlibrary[turn]['medoid_phi2']
+                medoid_psi2=turnlibrary[turn]['medoid_psi2']
+                medoid_omega3=turnlibrary[turn]['medoid_omega3']
+                medoid_phi3=turnlibrary[turn]['medoid_phi3']
+                medoid_psi3=turnlibrary[turn]['medoid_psi3']
+                medoid_omega4=turnlibrary[turn]['medoid_omega4']
+    
+                D = (angle_distance(omega2, medoid_omega2) +
+                     angle_distance(phi2, medoid_phi2) +
+                     angle_distance(psi2, medoid_psi2) +
+                     angle_distance(omega3, medoid_omega3) +
+                     angle_distance(phi3, medoid_phi3) +
+                     angle_distance(psi3, medoid_psi3) +
+                     angle_distance(omega4, medoid_omega4))/7.0
+                if D<minD:
+                    minD = D
+                    minturn=turn
+                    
+            if minD<= TURN_DIST_CUTOFF:
+                nturns += 1
+                resnum1 = int(datadict[chain][i]['auth_key'][1])
+                resnum4 = resnum1+3
+                prevname = turnlibrary[minturn]['prev_name']
+                mintheta=find_theta_in_degrees(minD)
+                seq = datadict[chain][i]['res1'] + datadict[chain][i+1]['res1'] + datadict[chain][i+2]['res1'] + datadict[chain][i+3]['res1']
+                print(f'turn {nturns:4} {chain.id:4} {resnum1:4} {resnum4:4}    {seq:4} {dssp_string:4}    {minturn:5}  {prevname:13}    {minD:6.4f} {mintheta:7.2f} {CA1_CA4_distance:7.2f}    {omega2:7.2f} {phi2:7.2f} {psi2:7.2f}  {omega3:7.2f} {phi3:7.2f}  {psi3:7.2f} {omega4:7.2f}   {shortfilename}')
+    
+    
+if __name__ == "__main__":
+    main()
+    
